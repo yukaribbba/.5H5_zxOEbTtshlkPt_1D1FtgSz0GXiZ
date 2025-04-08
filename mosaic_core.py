@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from functools import partial
 from typing import Union
 
 import numpy as np
@@ -228,7 +229,7 @@ class Mosaic:
                 stderr = proc.stderr.read() if proc.stderr else None
                 raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=stderr)
 
-    def try_bigtiff(self, argv1: list, argv1_bigtiff: list, output_image: str):
+    def try_bigtiff_simple_mosaic(self, argv1: list, argv1_bigtiff: list, output_image: str):
         error = None
         try:
             self.run_command(argv1)
@@ -282,7 +283,7 @@ class Mosaic:
         argv1_bigtiff.extend(bigtiff_options)
         argv1_bigtiff.extend(ready_images)
 
-        error = self.try_bigtiff(argv1, argv1_bigtiff, self.output)
+        error = self.try_bigtiff_simple_mosaic(argv1, argv1_bigtiff, self.output)
 
         argv2 = ["python", "-m", "osgeo_utils.gdal_merge", "-o", self.output_boundary, "-n", str(0),
                  "-co", "COMPRESS=DEFLATE", "-co", "ZLEVEL=6", "-co", "PREDICTOR=2"]
@@ -297,7 +298,7 @@ class Mosaic:
         argv2_bigtiff.extend(boundary_list)
 
         if error is None and boundary_need:
-            error = self.try_bigtiff(argv2, argv2_bigtiff, self.output_boundary)
+            error = self.try_bigtiff_simple_mosaic(argv2, argv2_bigtiff, self.output_boundary)
 
         return self.output_boundary, error
 
@@ -330,6 +331,33 @@ class Mosaic:
 
         return binary_image
 
+    def merged_into_whole_scene_and_get_data(self, filename: str, target_image_geometry: tuple,
+                                             original_image_geometry: tuple, dtype, data: np.ndarray):
+        xsize, ysize, geotransform = target_image_geometry
+        proj, tran = original_image_geometry
+
+        img = f"/vsimem/img_{filename}.tif"
+        with DRIVER.Create(img, xsize, ysize, 1, dtype, CREATE_OPTIONS) as single_ds:
+            single_ds.GetRasterBand(1).WriteArray(data)
+            single_ds.SetProjection(proj)
+            single_ds.SetGeoTransform(tran)
+            single_ds.FlushCache()
+
+        merged_img = f"/vsimem/merged_img_{filename}.tif"
+        with DRIVER.Create(merged_img, xsize, ysize, 1, dtype, CREATE_OPTIONS) as merged_ds:
+            merged_ds.SetProjection(self.base_proj)
+            merged_ds.SetGeoTransform(geotransform)
+            single_distance_info = gdal_merge.names_to_fileinfos([img])
+
+            single_distance_info[0].copy_into(merged_ds, 1, 1, None)
+            extract_data = merged_ds.GetRasterBand(1).ReadAsArray(0, 0, xsize, ysize)
+
+            merged_ds.FlushCache()
+        gdal.Unlink(merged_img)
+        gdal.Unlink(img)
+
+        return extract_data
+
     def write_final_image(self, image_geometry: tuple, format_kwargs: dict, tags: dict, mosaic_arrays: dict):
         xsize, ysize, geotransform = image_geometry
         sum_dis_array = sum(mosaic_arrays[img].distance for img in mosaic_arrays)
@@ -359,6 +387,26 @@ class Mosaic:
             final_boundary_ds.SetGeoTransform(geotransform)
             final_boundary_ds.GetRasterBand(1).WriteArray(sum_bin_array)
             final_boundary_ds.FlushCache()
+
+    def try_big_tiff_large_feather_mosaic(self, func, func_bigtiff):
+        error = None
+
+        try:
+            func()
+        except RuntimeError:
+            if os.path.exists(self.output):
+                gdal.Unlink(self.output)
+
+            print("文件可能超过4GB, 因此需启用BigTIFF后重试")
+
+            try:
+                func_bigtiff()
+            except Exception as e:
+                error = e
+        except Exception as e:
+            error = e
+
+        return error
 
     def large_feather_mosaic(self, need_final_bound=True, tags: dict | None = None, format_kwargs: dict | None = None):
         if tags is None:
@@ -432,45 +480,14 @@ class Mosaic:
             distance_map_data = sitk.GetArrayFromImage(distance_map)
             distance_map_data = np.where(distance_map_data <= 0, 0, distance_map_data)
 
-            distance = f"/vsimem/dis_{filename}.tif"
-            with DRIVER.Create(distance, xsize, ysize, 1, gdal.GDT_Float32, CREATE_OPTIONS) as distance_ds:
-                distance_ds.GetRasterBand(1).WriteArray(distance_map_data)
-                distance_ds.SetProjection(proj)
-                distance_ds.SetGeoTransform(tran)
-                distance_ds.FlushCache()
-
-            temp_distance = f"/vsimem/tmp_dis_{filename}.tif"
-            with DRIVER.Create(temp_distance, xsize, ysize, 1, gdal.GDT_Float32, CREATE_OPTIONS) as temp_distance_ds:
-                temp_distance_ds.SetProjection(self.base_proj)
-                temp_distance_ds.SetGeoTransform(geotransform)
-                single_distance_info = gdal_merge.names_to_fileinfos([distance])
-
-                single_distance_info[0].copy_into(temp_distance_ds, 1, 1, None)
-                distance_data = temp_distance_ds.GetRasterBand(1).ReadAsArray(0, 0, xsize, ysize)
-
-                temp_distance_ds.FlushCache()
-            gdal.Unlink(temp_distance)
-            gdal.Unlink(distance)
-
-            binary = f"/vsimem/bin_{filename}.tif"
-            with DRIVER.Create(binary, xsize, ysize, 1, gdal.GDT_Byte) as binary_ds:
-                binary_ds.GetRasterBand(1).WriteArray(255 - sitk.GetArrayFromImage(binary_image))
-                binary_ds.SetProjection(proj)
-                binary_ds.SetGeoTransform(tran)
-                binary_ds.FlushCache()
-
-            temp_binary = f"/vsimem/tmp_bin_{filename}.tif"
-            with DRIVER.Create(temp_binary, xsize, ysize, 1, gdal.GDT_Byte) as temp_binary_ds:
-                temp_binary_ds.SetProjection(self.base_proj)
-                temp_binary_ds.SetGeoTransform(geotransform)
-                single_binary_info = gdal_merge.names_to_fileinfos([binary])
-
-                single_binary_info[0].copy_into(temp_binary_ds, 1, 1, None)
-                binary_data = temp_binary_ds.GetRasterBand(1).ReadAsArray(0, 0, xsize, ysize)
-
-                temp_binary_ds.FlushCache()
-            gdal.Unlink(temp_binary)
-            gdal.Unlink(binary)
+            distance_data = self.merged_into_whole_scene_and_get_data(filename, (xsize, ysize, geotransform),
+                                                                      (proj, tran),
+                                                                      gdal.GDT_Float32,
+                                                                      distance_map_data)
+            binary_data = self.merged_into_whole_scene_and_get_data(filename, (xsize, ysize, geotransform),
+                                                                    (proj, tran),
+                                                                    gdal.GDT_Byte,
+                                                                    255 - sitk.GetArrayFromImage(binary_image))
 
             image_data = ImageData(bands_dict, distance_data, binary_data)
             mosaic_arrays[image] = image_data
@@ -478,48 +495,18 @@ class Mosaic:
             fi_processed = fi_processed + 1
             gdal.TermProgress_nocb(fi_processed / float(len(file_infos)))
 
-        try_bigtiff = False
-        image_done = False
-        error = None
+        wrapped_final_image = partial(self.write_final_image,
+                                      (xsize, ysize, geotransform), format_kwargs, tags, mosaic_arrays)
+        wrapped_final_image_bigtiff = partial(self.write_final_image,
+                                              (xsize, ysize, geotransform), bigtiff_format_kwargs, tags, mosaic_arrays)
+        wrapped_final_boundary = partial(self.write_final_boundary,
+                                         (xsize, ysize, geotransform), bin_format_kwargs, mosaic_arrays)
+        wrapped_final_boundary_bigtiff = partial(self.write_final_boundary,
+                                                 (xsize, ysize, geotransform), bin_bigtiff_format_kwargs, mosaic_arrays)
 
-        try:
-            self.write_final_image((xsize, ysize, geotransform), format_kwargs, tags, mosaic_arrays)
-            image_done = True
-        except RuntimeError:
-            try_bigtiff = True
-        except Exception as e:
-            error = e
+        error = self.try_big_tiff_large_feather_mosaic(wrapped_final_image, wrapped_final_image_bigtiff)
 
-        if try_bigtiff:
-            if os.path.exists(self.output):
-                gdal.Unlink(self.output)
-
-            print("文件可能超过4GB, 因此需启用BigTIFF后重试")
-
-            try:
-                self.write_final_image((xsize, ysize, geotransform), bigtiff_format_kwargs, tags, mosaic_arrays)
-                image_done = True
-            except Exception as e:
-                error = e
-
-        if need_final_bound and image_done:
-            boundary_try_bigtiff = False
-            try:
-                self.write_final_boundary((xsize, ysize, geotransform), bin_format_kwargs, mosaic_arrays)
-            except RuntimeError:
-                boundary_try_bigtiff = True
-            except Exception as e:
-                error = e
-
-            if boundary_try_bigtiff:
-                if os.path.exists(self.output_boundary):
-                    gdal.Unlink(self.output_boundary)
-
-                print("文件可能超过4GB, 因此需启用BigTIFF后重试")
-
-                try:
-                    self.write_final_boundary((xsize, ysize, geotransform), bin_bigtiff_format_kwargs, mosaic_arrays)
-                except Exception as e:
-                    error = e
+        if need_final_bound and error is None:
+            error = self.try_big_tiff_large_feather_mosaic(wrapped_final_boundary, wrapped_final_boundary_bigtiff)
 
         return error
