@@ -331,30 +331,40 @@ class Mosaic:
 
         return binary_image
 
-    def merged_into_whole_scene_and_get_data(self, filename: str, target_image_geometry: tuple,
-                                             original_image_geometry: tuple, dtype, data: np.ndarray):
-        xsize, ysize, geotransform = target_image_geometry
-        proj, tran = original_image_geometry
+    @staticmethod
+    def write_tmp_dis_bin(tmp_file: str, image_geometry: tuple, dtype, data: np.ndarray):
+        proj, tran = image_geometry
 
-        img = f"/vsimem/img_{filename}.tif"
-        with DRIVER.Create(img, xsize, ysize, 1, dtype, CREATE_OPTIONS) as single_ds:
-            single_ds.GetRasterBand(1).WriteArray(data)
+        with DRIVER.Create(tmp_file, data.shape[1], data.shape[0], 1, dtype, CREATE_OPTIONS) as single_ds:
             single_ds.SetProjection(proj)
             single_ds.SetGeoTransform(tran)
+            single_ds.GetRasterBand(1).WriteArray(data)
             single_ds.FlushCache()
 
-        merged_img = f"/vsimem/merged_img_{filename}.tif"
-        with DRIVER.Create(merged_img, xsize, ysize, 1, dtype, CREATE_OPTIONS) as merged_ds:
+    def single_merged_into_scene_and_get_data(self, files: tuple, image_geometry: tuple,
+                                              dtype, del_input_file=True):
+        input_single_file, merged_file = files
+        xsize, ysize, geotransform = image_geometry
+
+        with gdal.Open(input_single_file) as ds:
+            bands = ds.RasterCount
+
+        with DRIVER.Create(merged_file, xsize, ysize, bands, dtype, CREATE_OPTIONS) as merged_ds:
             merged_ds.SetProjection(self.base_proj)
             merged_ds.SetGeoTransform(geotransform)
-            single_distance_info = gdal_merge.names_to_fileinfos([img])
+            single_image_info = gdal_merge.names_to_fileinfos([input_single_file])
 
-            single_distance_info[0].copy_into(merged_ds, 1, 1, None)
-            extract_data = merged_ds.GetRasterBand(1).ReadAsArray(0, 0, xsize, ysize)
+            extract_data: list[np.ndarray] = []
+            for band in range(1, bands + 1):
+                single_image_info[0].copy_into(merged_ds, band, band, self.nodata)
+                data = merged_ds.GetRasterBand(band).ReadAsArray(0, 0, xsize, ysize)
+                extract_data.append(data)
 
             merged_ds.FlushCache()
-        gdal.Unlink(merged_img)
-        gdal.Unlink(img)
+
+        gdal.Unlink(merged_file)
+        if del_input_file:
+            gdal.Unlink(input_single_file)
 
         return extract_data
 
@@ -459,37 +469,33 @@ class Mosaic:
                 proj = ds.GetProjection()
                 tran = ds.GetGeoTransform()
 
-            temp_image = f"/vsimem/tmp_{filename}.tif"
-            with DRIVER.Create(temp_image, xsize, ysize, self.base_bands, self.base_dtype,
-                               CREATE_OPTIONS) as temp_image_ds:
-                temp_image_ds.SetProjection(self.base_proj)
-                temp_image_ds.SetGeoTransform(geotransform)
-                single_image_info = gdal_merge.names_to_fileinfos([image])
-
-                bands_dict: dict[int, np.ndarray] = {}
-                for band in range(1, self.base_bands + 1):
-                    single_image_info[0].copy_into(temp_image_ds, band, band, self.nodata)
-                    data = temp_image_ds.GetRasterBand(band).ReadAsArray(0, 0, xsize, ysize)
-                    bands_dict[band] = data
-                temp_image_ds.FlushCache()
-            gdal.Unlink(temp_image)
+            tmp_image = f"/vsimem/tmp_{filename}.tif"
+            merged_image_data = self.single_merged_into_scene_and_get_data((image, tmp_image),
+                                                                           (xsize, ysize, geotransform),
+                                                                           self.base_dtype, False)
+            bands_dict = {idx + 1: band_data for idx, band_data in enumerate(merged_image_data)}
 
             binary_image = self.get_binary_image(idx, image)
-
             distance_map = sitk.DanielssonDistanceMap(binary_image, inputIsBinary=True, useImageSpacing=True)
             distance_map_data = sitk.GetArrayFromImage(distance_map)
             distance_map_data = np.where(distance_map_data <= 0, 0, distance_map_data)
 
-            distance_data = self.merged_into_whole_scene_and_get_data(filename, (xsize, ysize, geotransform),
-                                                                      (proj, tran),
-                                                                      gdal.GDT_Float32,
-                                                                      distance_map_data)
-            binary_data = self.merged_into_whole_scene_and_get_data(filename, (xsize, ysize, geotransform),
-                                                                    (proj, tran),
-                                                                    gdal.GDT_Byte,
-                                                                    255 - sitk.GetArrayFromImage(binary_image))
+            tmp_distance = f"/vsimem/tmp_dis_{filename}.tif"
+            merged_tmp_distance = f"/vsimem/tmp_merged_dis_{filename}.tif"
+            self.write_tmp_dis_bin(tmp_distance, (proj, tran), gdal.GDT_Float32, distance_map_data)
+            merged_distance_data = self.single_merged_into_scene_and_get_data((tmp_distance, merged_tmp_distance),
+                                                                              (xsize, ysize, geotransform),
+                                                                              gdal.GDT_Float32)
 
-            image_data = ImageData(bands_dict, distance_data, binary_data)
+            tmp_binary = f"/vsimem/tmp_bin_{filename}.tif"
+            merged_tmp_binary = f"/vsimem/tmp_merged_bin_{filename}.tif"
+            self.write_tmp_dis_bin(tmp_binary, (proj, tran), gdal.GDT_Byte, 255 - sitk.GetArrayFromImage(binary_image))
+            merged_binary_data = self.single_merged_into_scene_and_get_data((tmp_binary, merged_tmp_binary),
+                                                                            (xsize, ysize, geotransform),
+                                                                            gdal.GDT_Byte)
+
+
+            image_data = ImageData(bands_dict, merged_distance_data[0], merged_binary_data[0])
             mosaic_arrays[image] = image_data
 
             fi_processed = fi_processed + 1
