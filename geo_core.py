@@ -278,9 +278,9 @@ class GeoProcessor:
 
     def valid_area(self) -> tuple[bool, list[str]]:
         area_errors = [
-            (lambda: len(self.target_xy.split()) != 4, "\n\"非经纬度xy坐标\"填写有误"),
-            (lambda: self.target_width <= 0 or self.target_height <= 0, "\n\"宽/高\"填写有误"),
-            (lambda: self.resolution_x != self.resolution_y, "\n宽/高方向分辨率不相等\n检查 \"宽/高\" 和 \"非经纬度xy坐标\"")
+            (lambda: len(self.target_xy.split()) != 4, '\n"非经纬度xy坐标"填写有误'),
+            (lambda: self.target_width <= 0 or self.target_height <= 0, '\n"宽/高"填写有误'),
+            (lambda: self.resolution_x != self.resolution_y, '\n宽/高方向分辨率不相等\n检查 "宽/高" 和 "非经纬度xy坐标"')
         ]
 
         errors: list[str] = []
@@ -336,7 +336,7 @@ class GeoProcessor:
                                         warpOptions=["NUM_THREADS=ALL_CPUS"],
                                         callback=gdal.TermProgress_nocb)
 
-        with gdal.Warp(crop_ref_file, void_file, options=warp_options) as crop_ds:
+        with (gdal.Warp(crop_ref_file, void_file, options=warp_options) as crop_ds):
             crop_geotransform = crop_ds.GetGeoTransform()
 
             if self.target_proj != self.original_geos_proj:
@@ -344,7 +344,8 @@ class GeoProcessor:
                 max_y = crop_geotransform[3]
                 max_x = min_x + crop_geotransform[1] * crop_ds.RasterXSize
                 min_y = max_y + crop_geotransform[5] * crop_ds.RasterYSize
-                self_tolerance = 0.25 if "latlon" in self.original_geos_proj or "longlat" in self.original_geos_proj else 1000
+                self_tolerance = 0.25 if "latlon" in self.original_geos_proj or "longlat" in self.original_geos_proj \
+                                 else 1000
                 res_tolerance = 0.25 if "latlon" in self.target_proj or "longlat" in self.target_proj else 1000
                 crop_min_x = round(min_x / self_tolerance) * self_tolerance - 5 * round(
                     self.resolution / res_tolerance) * self_tolerance
@@ -1034,7 +1035,7 @@ class GeoProcessor:
             print(f"{sat}卫星数据善后完毕")
 
         if clean_dict is not None:
-            print(f"开始善后其他临时文件")
+            print("开始善后其他临时文件")
             for key in clean_dict.keys():
                 if clean_dict[key] == "folder":
                     try:
@@ -1049,7 +1050,7 @@ class GeoProcessor:
                     except Exception as e:
                         print(e)
                         pass
-            print(f"其他临时文件善后完毕")
+            print("其他临时文件善后完毕")
 
 
 class GeoCalculator:
