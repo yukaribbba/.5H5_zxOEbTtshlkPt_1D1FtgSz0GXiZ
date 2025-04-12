@@ -1,22 +1,22 @@
 #!/usr/bin/python
+import bz2
 import glob
-import os
 import math
+import os
 import queue
 import re
 import shutil
 import time as time_calc
-import warnings
-import zipfile
-from datetime import datetime, timedelta, UTC
-from functools import partial
 import urllib.error
 import urllib.request
+import warnings
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from functools import partial
 from urllib.parse import unquote
 
 import boto3
-import bz2
 import dask.array as da
 import eumdac
 import hdf5plugin
@@ -28,15 +28,15 @@ from botocore import UNSIGNED
 from botocore.client import Config
 from osgeo import gdal
 from pyproj import Proj
+
 import satpy
 import satpy.enhancements
-from satpy import config, Scene, find_files_and_readers, utils
-from satpy.composites import GenericCompositor, LOG, MASKING_COMPOSITOR_METHODS
-from satpy.readers import generic_image
-from satpy.enhancements import exclude_alpha, on_dask_array
-from satpy.writers import geotiff
-
 from mosaic_core import Mosaic
+from satpy import Scene, config, find_files_and_readers, utils
+from satpy.composites import LOG, MASKING_COMPOSITOR_METHODS, GenericCompositor
+from satpy.enhancements import exclude_alpha, on_dask_array
+from satpy.readers import generic_image
+from satpy.writers import geotiff
 
 gdal_options = ("tfw",
                 "rpb",
@@ -2892,5 +2892,3 @@ def compute_writer_results(results):
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         executor.map(gdal_dict_to_geotiff, results)
-
-
