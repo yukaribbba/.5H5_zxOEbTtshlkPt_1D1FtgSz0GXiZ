@@ -1,17 +1,27 @@
 #!/usr/bin/python
-import shutil
-from datetime import datetime, timedelta
 import os
 import re
+import shutil
 import sys
 import warnings
+from datetime import datetime, timedelta
 
 import pyproj
 import ruamel.yaml
-from PyQt6.QtCore import QRect, QThread, pyqtSignal, QRegularExpression, QDate, QTime
+from PyQt6.QtCore import QDate, QRect, QRegularExpression, QThread, QTime, pyqtSignal
 from PyQt6.QtGui import QFont, QIntValidator, QRegularExpressionValidator
-from PyQt6.QtWidgets import (QWidget, QLabel, QPushButton, QApplication, QLineEdit, QComboBox, QTabWidget, QListWidget,
-                             QCheckBox, QListWidgetItem)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QTabWidget,
+    QWidget,
+)
 
 
 def check_proj4_validity(string):
