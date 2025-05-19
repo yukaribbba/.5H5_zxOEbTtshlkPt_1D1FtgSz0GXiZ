@@ -1,24 +1,25 @@
 #!/usr/bin/python
 import bz2
 import glob
+import html.parser
+import http.cookiejar
 import math
 import os
 import queue
 import re
 import shutil
 import time as time_calc
-import urllib.error, urllib.parse, urllib.request
+import urllib.error
+import urllib.parse
+import urllib.request
 import warnings
+import xml.etree.ElementTree
 import zipfile
 from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote
-
-import http.cookiejar
-import html.parser
-import xml.etree.ElementTree
 
 import boto3
 import dask.array as da
@@ -30,6 +31,7 @@ import trollimage.xrimage
 import xarray as xr
 from botocore import UNSIGNED
 from botocore.client import Config
+from mosaic_core import Mosaic
 from osgeo import gdal
 from pyproj import Proj
 
@@ -40,9 +42,6 @@ from satpy.composites import LOG, MASKING_COMPOSITOR_METHODS, GenericCompositor
 from satpy.enhancements import exclude_alpha, on_dask_array
 from satpy.readers import generic_image
 from satpy.writers import geotiff
-
-
-from mosaic_core import Mosaic
 
 GDAL_OPTIONS = ("tfw",
                 "rpb",
@@ -3204,6 +3203,3 @@ class DIASAccess:
 class LoginError(Exception):
     def __init__(self, e):
         Exception.__init__(self, e)
-
-
-
