@@ -1,19 +1,31 @@
 #!/usr/bin/python
-from datetime import datetime, timedelta, UTC
 import os
+import smtplib
 import sys
 import warnings
+from datetime import UTC, datetime, timedelta
+from email.mime.text import MIMEText
 
 import pyproj
 import ruamel.yaml
-from PyQt6.QtCore import QRect, QThread, pyqtSignal, QMutex, QMutexLocker, QWaitCondition
-from PyQt6.QtGui import QFont, QIntValidator
-from PyQt6.QtWidgets import (QWidget, QLabel, QPushButton, QApplication, QLineEdit, QComboBox, QTabWidget, QListWidget,
-                             QCheckBox, QListWidgetItem, QRadioButton, QButtonGroup)
-import smtplib
-from email.mime.text import MIMEText
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from PyQt6.QtCore import QMutex, QMutexLocker, QRect, QThread, QWaitCondition, pyqtSignal
+from PyQt6.QtGui import QFont, QIntValidator
+from PyQt6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QRadioButton,
+    QTabWidget,
+    QWidget,
+)
 
 
 def check_proj4_validity(string):
